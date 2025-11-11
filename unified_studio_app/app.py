@@ -7,7 +7,6 @@ st.set_page_config(page_title="Role‑based Creative Chatbot", page_icon="🎭",
 # ------------------------------- Styles -------------------------------
 st.markdown("""
 <style>
-/* subtle card look */
 .block-container {max-width: 1100px;}
 .role-desc {background:#e9f0ff;border-left:4px solid #7aa2ff;padding:14px;border-radius:6px;}
 .smallcap {color:#6b7280;font-size:13px;}
@@ -18,14 +17,12 @@ st.markdown("""
 # ------------------------------- Sidebar -------------------------------
 st.sidebar.subheader("🔑 API & Role Settings")
 
-# Provider selector
 provider = st.sidebar.selectbox("Choose a provider", ["Auto", "Anthropic Claude", "OpenAI", "Free Demo (No API)"], index=0)
 
-# Read keys from sidebar (will not crash if left empty)
 if "CLAUDE_API_KEY" not in st.session_state: st.session_state["CLAUDE_API_KEY"] = ""
 if "OPENAI_API_KEY" not in st.session_state: st.session_state["OPENAI_API_KEY"] = ""
 
-# Try to auto-fill from secrets if available, but don't require it
+# Try to read from secrets if present, but do not require
 try:
     if not st.session_state["OPENAI_API_KEY"]:
         st.session_state["OPENAI_API_KEY"] = st.secrets.get("OPENAI_API_KEY","")
@@ -37,15 +34,19 @@ try:
 except Exception:
     pass
 
+# Key inputs
 if provider in ("OpenAI","Auto"):
-    val = st.sidebar.text_input("Enter your OpenAI API Key:", type="password", value=st.session_state["OPENAI_API_KEY"])
+    val = st.sidebar.text_input("OpenAI API Key", type="password", value=st.session_state["OPENAI_API_KEY"])
     if val: st.session_state["OPENAI_API_KEY"] = val
 
 if provider in ("Anthropic Claude","Auto"):
-    val = st.sidebar.text_input("Enter your Claude API Key:", type="password", value=st.session_state["CLAUDE_API_KEY"])
+    val = st.sidebar.text_input("Claude API Key", type="password", value=st.session_state["CLAUDE_API_KEY"])
     if val: st.session_state["CLAUDE_API_KEY"] = val
+    # If empty and user picked Claude explicitly, show a gentle prompt (not an error box in main UI)
+    if provider == "Anthropic Claude" and not st.session_state["CLAUDE_API_KEY"]:
+        st.sidebar.info("请输入 Claude API Key。未填写时将使用本地 Demo。")
 
-# Roles from the slides
+# Roles list (expanded per your slides)
 ROLES: Dict[str, Dict[str,str]] = {
     "🎬 Video Director": {
         "desc": "Analyzes mood, camera angle, lighting. Speaks in cinematic language (movement, lenses, framing, tone).",
@@ -77,18 +78,17 @@ st.markdown(f"<div class='hero-title'>Role‑based Creative Chatbot</div>", unsa
 st.write("Select a creative role and ask your question!")
 st.caption("Built for 'Art & Advanced Big Data' • Role Demo")
 
-# Input area
 st.markdown("<span class='smallcap'>💬 Enter your question or idea:</span>", unsafe_allow_html=True)
 user_q = st.text_input("", placeholder="e.g., How can I shoot a dream sequence?")
 
 def local_template_answer(role: str, q: str) -> str:
-    q = q.strip() or "your idea"
+    q = (q or "").strip() or "your idea"
     if "Video Director" in role:
         return f"""**Cinematic Plan**
 - Logline: {q}
 - Coverage: WS (geography) → MS (performance) → CU (emotional beats)
 - Lenses: 24/35/85mm; shoot around T2.8; ND outdoor
-- Movement: slow dolly push for intimacy; handheld on turning points
+- Movement: slow dolly push; handheld on turning points
 - Lighting: soft key + edge; practicals for depth; haze for glow
 - Color: muted base, one saturated accent
 - Next: 8–12 shot board with time budget"""
@@ -123,6 +123,7 @@ def local_template_answer(role: str, q: str) -> str:
     return q
 
 def try_claude(system_prompt: str, user_prompt: str) -> str:
+    # Returns text; raises only for import/setup errors, not shown to user in UI (silent fallback handled by caller)
     from anthropic import Anthropic
     client = Anthropic(api_key=st.session_state.get("CLAUDE_API_KEY",""))
     msg = client.messages.create(
@@ -131,7 +132,6 @@ def try_claude(system_prompt: str, user_prompt: str) -> str:
         system=system_prompt,
         messages=[{"role":"user","content": user_prompt}]
     )
-    # Concatenate content blocks
     try:
         return "".join([blk.text for blk in msg.content if hasattr(blk, "text")])
     except Exception:
@@ -152,49 +152,51 @@ def try_openai(system_prompt: str, user_prompt: str) -> str:
 
 def auto_fallback_answer(provider_choice: str, role: str, q: str) -> str:
     system = ROLES[role]["system"]
-    q = q.strip()
+    q = (q or "").strip()
     if not q:
         return "Please type a question first."
-    # Free demo path
+
+    # Explicit Free Demo
     if provider_choice == "Free Demo (No API)":
         return local_template_answer(role, q)
-    # Anthropic explicitly
+
+    # Explicit Claude: if key empty → show gentle prompt via sidebar handled above; still return Demo
     if provider_choice == "Anthropic Claude":
         key = st.session_state.get("CLAUDE_API_KEY","")
         if not key:
-            return "⚠️ No Claude API key detected — showing Free Demo result.\n\n" + local_template_answer(role, q)
+            return local_template_answer(role, q)
+        # If key provided but invalid or any error happens → silent fallback to Demo (no warnings, no red boxes)
         try:
             return try_claude(system, q)
-        except Exception as e:
-            return f"⚠️ Claude error → fallback:\n`{e}`\n\n" + local_template_answer(role, q)
-    # OpenAI explicitly
+        except Exception:
+            return local_template_answer(role, q)
+
+    # Explicit OpenAI: if key empty → demo; on errors → demo (silent)
     if provider_choice == "OpenAI":
         key = st.session_state.get("OPENAI_API_KEY","")
         if not key:
-            return "⚠️ No OpenAI API key detected — showing Free Demo result.\n\n" + local_template_answer(role, q)
+            return local_template_answer(role, q)
         try:
             return try_openai(system, q)
-        except Exception as e:
-            return f"⚠️ OpenAI error → fallback:\n`{e}`\n\n" + local_template_answer(role, q)
-    # Auto: prefer Claude then OpenAI, else demo
+        except Exception:
+            return local_template_answer(role, q)
+
+    # Auto mode: try Claude→OpenAI, but NEVER show error/info; silently fall back to Demo
     if provider_choice == "Auto":
-        # Try Claude if key exists
         ckey = st.session_state.get("CLAUDE_API_KEY","")
         if ckey:
             try:
                 return try_claude(system, q)
-            except Exception as e:
-                st.info(f"Claude failed, trying OpenAI… ({e})")
-        # Try OpenAI if key exists
+            except Exception:
+                pass
         okey = st.session_state.get("OPENAI_API_KEY","")
         if okey:
             try:
                 return try_openai(system, q)
-            except Exception as e:
-                st.info(f"OpenAI failed, showing Demo… ({e})")
-        # Fallback to local
+            except Exception:
+                pass
         return local_template_answer(role, q)
-    # default
+
     return local_template_answer(role, q)
 
 if st.button("Generate Response"):
