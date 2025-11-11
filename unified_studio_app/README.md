@@ -1,10 +1,9 @@
-# Role‑based Creative Chatbot — Auto Fallback
+# Role‑based Creative Chatbot — Auto Fallback (Silent Claude Fail)
 
-A Streamlit app matching the course screenshots:
-- Sidebar: API key field(s), role picker with description
-- Main: single question box + "Generate Response"
-- Providers: **Auto / Claude / OpenAI / Free Demo (No API)**
-- **Auto Fallback**: if secrets/keys missing or API errors (billing/quota), it gracefully falls back to a local templated answer.
+**What’s new (per your request):**
+- If **Claude key is invalid** → **no warnings, no red error box, no messages**. The app **silently** falls back to **Free Demo** and answers normally.
+- If **Claude key is empty** (and provider=Claude) → a **gentle prompt in the sidebar** asks for a key. It still answers using **Free Demo** meanwhile.
+- In **Auto** mode, the app tries Claude → OpenAI → Demo **silently**, with zero UI noise on failures.
 
 ## Run
 ```bash
@@ -12,7 +11,6 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Notes
-- It *tries* to read `st.secrets["OPENAI_API_KEY"]` and `st.secrets["ANTHROPIC_API_KEY"]` if present, but never crashes without them. You can also paste keys in the sidebar.
-- In **Auto** mode it prefers Claude (if key present), then OpenAI, otherwise Free Demo.
-- No image generation here — this matches the role‑based chatbot spec from your slides.
+## Providers
+- Auto / Anthropic Claude / OpenAI / Free Demo (No API)
+- Keys can be pasted in the sidebar. If you also configure `st.secrets`, the app will read them when available but never requires them.
