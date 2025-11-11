@@ -1,223 +1,202 @@
 
 import streamlit as st
-import numpy as np
 from typing import Dict
-from PIL import Image, ImageDraw, ImageFont
 
-st.set_page_config(page_title="Unified Studio", page_icon="🎛️", layout="wide")
+st.set_page_config(page_title="Role‑based Creative Chatbot", page_icon="🎭", layout="wide")
 
-# ---------- Sidebar: Provider, Keys, Role ----------
-st.sidebar.header("⚙️ Settings")
+# ------------------------------- Styles -------------------------------
+st.markdown("""
+<style>
+/* subtle card look */
+.block-container {max-width: 1100px;}
+.role-desc {background:#e9f0ff;border-left:4px solid #7aa2ff;padding:14px;border-radius:6px;}
+.smallcap {color:#6b7280;font-size:13px;}
+.hero-title {font-size:36px;font-weight:800;letter-spacing:.2px;}
+</style>
+""", unsafe_allow_html=True)
 
-PROVIDERS = ["Free Demo (No API)", "Anthropic Claude", "OpenAI"]
-provider = st.sidebar.selectbox("Provider", PROVIDERS, index=0)
+# ------------------------------- Sidebar -------------------------------
+st.sidebar.subheader("🔑 API & Role Settings")
 
-if "CLAUDE_API_KEY" not in st.session_state:
-    st.session_state["CLAUDE_API_KEY"] = ""
-if "OPENAI_API_KEY" not in st.session_state:
-    st.session_state["OPENAI_API_KEY"] = ""
+# Provider selector
+provider = st.sidebar.selectbox("Choose a provider", ["Auto", "Anthropic Claude", "OpenAI", "Free Demo (No API)"], index=0)
 
-if provider == "Anthropic Claude":
-    ck = st.sidebar.text_input("Claude API Key", type="password", value=st.session_state["CLAUDE_API_KEY"])
-    if ck: st.session_state["CLAUDE_API_KEY"] = ck
-elif provider == "OpenAI":
-    ok = st.sidebar.text_input("OpenAI API Key", type="password", value=st.session_state["OPENAI_API_KEY"])
-    if ok: st.session_state["OPENAI_API_KEY"] = ok
+# Read keys from sidebar (will not crash if left empty)
+if "CLAUDE_API_KEY" not in st.session_state: st.session_state["CLAUDE_API_KEY"] = ""
+if "OPENAI_API_KEY" not in st.session_state: st.session_state["OPENAI_API_KEY"] = ""
 
-ROLES: Dict[str, str] = {
-    "Video Director": "You visualize stories and direct how they are brought to life on screen.",
-    "Game Designer": "You craft interactive systems, level flow, and player motivation.",
-    "Photographer": "You think in light, lens, and composition to capture mood and story.",
-    "Graphic Designer": "You shape brand, layout, and hierarchy for clear visual communication.",
-    "Illustrator": "You convey ideas through stylized drawing, color, and texture.",
-}
-role = st.sidebar.selectbox("Role", list(ROLES.keys()))
-st.sidebar.write(ROLES[role])
+# Try to auto-fill from secrets if available, but don't require it
+try:
+    if not st.session_state["OPENAI_API_KEY"]:
+        st.session_state["OPENAI_API_KEY"] = st.secrets.get("OPENAI_API_KEY","")
+except Exception:
+    pass
+try:
+    if not st.session_state["CLAUDE_API_KEY"]:
+        st.session_state["CLAUDE_API_KEY"] = st.secrets.get("ANTHROPIC_API_KEY","")
+except Exception:
+    pass
 
-st.title("🎛️ Unified Studio")
-st.caption("Works offline in Free Demo mode. Switch provider to use Claude/OpenAI when you have credits.")
+if provider in ("OpenAI","Auto"):
+    val = st.sidebar.text_input("Enter your OpenAI API Key:", type="password", value=st.session_state["OPENAI_API_KEY"])
+    if val: st.session_state["OPENAI_API_KEY"] = val
 
-tab_chat, tab_image = st.tabs(["💬 Chat Assistant", "🖼️ Image Studio"])
+if provider in ("Anthropic Claude","Auto"):
+    val = st.sidebar.text_input("Enter your Claude API Key:", type="password", value=st.session_state["CLAUDE_API_KEY"])
+    if val: st.session_state["CLAUDE_API_KEY"] = val
 
-# ---------- Local role templates (no-API) ----------
-ROLE_TEMPLATES = {
-    "Video Director": lambda q: f"""**Cinematic Plan**
-- Logline: {q[:120]}...
-- Visual Language: handheld + 35mm look; teal/orange contrast; shallow DoF.
-- Coverage: WS for geography, MS for performance, CU for beats.
-- Lenses: 24/35/85mm; T2.8 indoors; ND outside.
-- Lighting: key (soft), edge (tube), practicals for depth.
-- Blocking: cross, over-shoulder reverses; inserts for props.
-- Transitions: motivated whip + L-cuts.
-- Color: muted base with saturated accents.
-- Next: shoot board (8–12 shots), 3h tech scout.
-""",
-    "Game Designer": lambda q: f"""**Design Slice**
-- Fantasy: {q[:120]}...
-- Core Loop: Explore → Collect → Upgrade → Challenge → Reward.
-- Mechanics: stamina risk, parry window, combo meter.
-- Progression: acts 1–3; unlock skill grid every 2 levels.
-- Systems: economy (sink/source), crafting tiers, rarity.
-- Level: 10-min lane → hub → boss arena.
-- Telemetry: failpoints, heatmaps, churn cohort D1/D7.
-- Scope: 2-week vertical slice.
-""",
-    "Photographer": lambda q: f"""**Shoot Plan**
-- Concept: {q[:120]}...
-- Lens/Camera: 35/85mm; f/1.8–2.8; base ISO 100.
-- Light: north window + bounce; golden hour rim; add 1/8 Black Pro-Mist.
-- Composition: rule-of-thirds, negative space, leading lines.
-- Color: skin‑safe palette; test gray card.
-- Post: basic grade, gentle S-curve, HSL skin guard.
-""",
-    "Graphic Designer": lambda q: f"""**Design Brief**
-- Message: {q[:120]}...
-- Grid: 8‑pt with 12‑col; baseline 4‑pt.
-- Type: Display + Humanist Sans; 1.25 scale.
-- Hierarchy: H1 48, H2 28, Body 16; 1.6 leading.
-- Color: WCAG AA; 1 accent color only.
-- Layout: hero → key value → proof → CTA.
-- Export: webp + svg; min CLS shifts.
-""",
-    "Illustrator": lambda q: f"""**Illustration Plan**
-- Prompt: {q[:120]}...
-- Thumbs: 3 comps (rule of thirds / central / diagonal).
-- Style: textured brushes, 3‑tone palette, soft edge control.
-- Process: rough → clean → color key → render → bounce light.
-- Delivery: 300dpi CMYK + RGB sRGB.
-""",
+# Roles from the slides
+ROLES: Dict[str, Dict[str,str]] = {
+    "🎬 Video Director": {
+        "desc": "Analyzes mood, camera angle, lighting. Speaks in cinematic language (movement, lenses, framing, tone).",
+        "system": "You are a professional film director. Always analyze ideas in terms of visual storytelling — camera movement, lens and framing, lighting, color, and emotional beats. Provide a concise shot plan."
+    },
+    "💃 Dance Instructor": {
+        "desc": "Suggests movement, rhythm, expression. Explains body mechanics and choreography blocks.",
+        "system": "You are a dance instructor. Provide rhythm/tempo cues, pose-to-pose breakdown, and tips for safe practice and expression."
+    },
+    "👗 Fashion Stylist": {
+        "desc": "Explains color trends, materials, silhouette. Gives outfit matrices and fit rules.",
+        "system": "You are a fashion stylist. Give silhouette guidance, color pairing, texture/material tips, and scenario-based outfits."
+    },
+    "🎭 Acting Coach": {
+        "desc": "Teaches emotion delivery, scene breakdown. Practical drills and beats.",
+        "system": "You are an acting coach. Provide beats, objectives/obstacles, tactics, and practical drills to deliver the emotion naturally."
+    },
+    "🖼️ Art Curator": {
+        "desc": "Interprets artwork and connects with data/context.",
+        "system": "You are an art curator. Analyze composition, color, motif, context, and articulate emotional effect with references."
+    },
 }
 
-ROLE_SYSTEMS = {
-    "Video Director": "You are an award-winning film director. Be concrete and operational.",
-    "Game Designer": "You are a senior game designer. Provide systems and scope.",
-    "Photographer": "You are a professional photographer. Give settings and light.",
-    "Graphic Designer": "You are a brand/layout designer. Stress hierarchy and accessibility.",
-    "Illustrator": "You are a concept artist. Provide steps and color guidance.",
-}
+role_label = st.sidebar.selectbox("Choose a role:", list(ROLES.keys()))
+st.sidebar.markdown(f"<div class='role-desc'>{ROLES[role_label]['desc']}</div>", unsafe_allow_html=True)
 
-def ensure_key_for(provider_name: str) -> bool:
-    if provider_name == "Anthropic Claude":
-        if not st.session_state.get("CLAUDE_API_KEY"):
-            st.warning("Enter your Claude API Key in the sidebar or switch to Free Demo mode.")
-            return False
-    elif provider_name == "OpenAI":
-        if not st.session_state.get("OPENAI_API_KEY"):
-            st.warning("Enter your OpenAI API Key in the sidebar or switch to Free Demo mode.")
-            return False
-    return True
+# ------------------------------- Main -------------------------------
+st.markdown(f"<div class='hero-title'>Role‑based Creative Chatbot</div>", unsafe_allow_html=True)
+st.write("Select a creative role and ask your question!")
+st.caption("Built for 'Art & Advanced Big Data' • Role Demo")
 
-# ---------- Chat Assistant ----------
-with tab_chat:
-    st.subheader(f"💬 {role} — Chat Assistant")
-    user_q = st.text_area("Your question / idea:", height=140, placeholder="e.g., Make a moving, intimate short about urban solitude.")
+# Input area
+st.markdown("<span class='smallcap'>💬 Enter your question or idea:</span>", unsafe_allow_html=True)
+user_q = st.text_input("", placeholder="e.g., How can I shoot a dream sequence?")
 
-    if st.button("Generate Response"):
-        if user_q.strip():
-            if provider == "Free Demo (No API)":
-                st.markdown(ROLE_TEMPLATES[role](user_q))
-            elif provider == "Anthropic Claude":
-                if ensure_key_for(provider):
-                    try:
-                        from anthropic import Anthropic
-                        client = Anthropic(api_key=st.session_state["CLAUDE_API_KEY"])
-                        msg = client.messages.create(
-                            model="claude-3-haiku-20240307",
-                            max_tokens=800,
-                            system=ROLE_SYSTEMS[role],
-                            messages=[{"role": "user", "content": user_q}],
-                        )
-                        # Claude returns list of content blocks
-                        out = ""
-                        try:
-                            out = "".join([blk.text for blk in msg.content if hasattr(blk, "text")])
-                        except Exception:
-                            out = str(msg)
-                        st.markdown(out)
-                    except ModuleNotFoundError:
-                        st.error("Missing `anthropic` package. Install with: `pip install anthropic` or use the included requirements.txt.")
-                    except Exception as e:
-                        st.error(f"Claude API error: {e}")
-            elif provider == "OpenAI":
-                if ensure_key_for(provider):
-                    try:
-                        from openai import OpenAI
-                        client = OpenAI(api_key=st.session_state["OPENAI_API_KEY"])
-                        # Use Chat Completions to avoid Responses API signature issues
-                        chat = client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": ROLE_SYSTEMS[role]},
-                                {"role": "user", "content": user_q},
-                            ],
-                            temperature=0.7,
-                        )
-                        st.markdown(chat.choices[0].message.content)
-                    except ModuleNotFoundError:
-                        st.error("Missing `openai` package. Install with: `pip install openai` or use the included requirements.txt.")
-                    except Exception as e:
-                        st.error(f"OpenAI API error: {e}")
-        else:
-            st.info("Please enter a question or idea.")
+def local_template_answer(role: str, q: str) -> str:
+    q = q.strip() or "your idea"
+    if "Video Director" in role:
+        return f"""**Cinematic Plan**
+- Logline: {q}
+- Coverage: WS (geography) → MS (performance) → CU (emotional beats)
+- Lenses: 24/35/85mm; shoot around T2.8; ND outdoor
+- Movement: slow dolly push for intimacy; handheld on turning points
+- Lighting: soft key + edge; practicals for depth; haze for glow
+- Color: muted base, one saturated accent
+- Next: 8–12 shot board with time budget"""
+    if "Dance Instructor" in role:
+        return f"""**Movement Plan**
+- Intention: {q}
+- Rhythm: 4×8 bars, tempo 96–104 BPM
+- Blocks: intro walk → motif A (upper body) → B (footwork) → bridge (turns) → finale pose
+- Technique: core engaged, soft knees, breath timing
+- Drill: mirror slow → tempo → music; film for review"""
+    if "Fashion Stylist" in role:
+        return f"""**Style Matrix**
+- Vibe: {q}
+- Silhouette: 1 fitted + 1 relaxed
+- Palette: 1 base, 1 neutral, 1 accent
+- Textures: matte + soft sheen
+- Looks: smart‑casual (blazer + tee + straight trousers), event (column dress + minimal jewelry)"""
+    if "Acting Coach" in role:
+        return f"""**Beat Sheet**
+- Objective: {q}
+- Obstacles: status gap, hidden info
+- Tactics: plead → threaten → withdraw → reveal
+- Drill: paraphrase + button lines; gesture economy; eye focus triangles
+- Note: mark breaths and playable actions"""
+    if "Art Curator" in role:
+        return f"""**Reading the Work**
+- Thesis: {q}
+- Composition: rule of thirds / negative space
+- Color: limited triad; temperature contrast
+- Motif: repetition & variation
+- Context: author/time/place; cross‑reference similar works"""
+    return q
 
-# ---------- Local Image Generator (always available) ----------
-def generate_placeholder_image(text: str, size_str: str) -> Image.Image:
-    w, h = map(int, size_str.split("x"))
-    # Soft noise background
-    arr = np.random.randint(180, 255, (h, w, 3), dtype=np.uint8)
-    img = Image.fromarray(arr, "RGB")
-    draw = ImageDraw.Draw(img)
-    # Text overlay (wrap)
-    wrapped = (text[:80] + "…") if len(text) > 80 else text
-    # Basic font: default
-    draw.rectangle([(0, h-80), (w, h)], fill=(240, 240, 240))
-    draw.text((16, h-64), "Prompt:", fill=(40, 40, 40))
-    draw.text((16, h-40), wrapped, fill=(10, 10, 10))
-    return img
+def try_claude(system_prompt: str, user_prompt: str) -> str:
+    from anthropic import Anthropic
+    client = Anthropic(api_key=st.session_state.get("CLAUDE_API_KEY",""))
+    msg = client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=800,
+        system=system_prompt,
+        messages=[{"role":"user","content": user_prompt}]
+    )
+    # Concatenate content blocks
+    try:
+        return "".join([blk.text for blk in msg.content if hasattr(blk, "text")])
+    except Exception:
+        return str(msg)
 
-with tab_image:
-    st.subheader("🖼️ Image Studio")
-    img_prompt = st.text_area("Describe the image:", height=120, placeholder="e.g., Neon rain alley, reflective puddles, cinematic bokeh.")
-    size = st.selectbox("Size", ["1024x1024", "768x768", "512x512"], index=1)
+def try_openai(system_prompt: str, user_prompt: str) -> str:
+    from openai import OpenAI
+    client = OpenAI(api_key=st.session_state.get("OPENAI_API_KEY",""))
+    chat = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role":"system","content": system_prompt},
+            {"role":"user","content": user_prompt},
+        ],
+        temperature=0.7,
+    )
+    return chat.choices[0].message.content
 
-    cols = st.columns(2)
-    if cols[0].button("Generate (Free Local)"):
-        if img_prompt.strip():
-            img = generate_placeholder_image(img_prompt, size)
-            st.image(img, caption="Local Demo Image", use_container_width=True)
-        else:
-            st.info("Please enter a description.")
+def auto_fallback_answer(provider_choice: str, role: str, q: str) -> str:
+    system = ROLES[role]["system"]
+    q = q.strip()
+    if not q:
+        return "Please type a question first."
+    # Free demo path
+    if provider_choice == "Free Demo (No API)":
+        return local_template_answer(role, q)
+    # Anthropic explicitly
+    if provider_choice == "Anthropic Claude":
+        key = st.session_state.get("CLAUDE_API_KEY","")
+        if not key:
+            return "⚠️ No Claude API key detected — showing Free Demo result.\n\n" + local_template_answer(role, q)
+        try:
+            return try_claude(system, q)
+        except Exception as e:
+            return f"⚠️ Claude error → fallback:\n`{e}`\n\n" + local_template_answer(role, q)
+    # OpenAI explicitly
+    if provider_choice == "OpenAI":
+        key = st.session_state.get("OPENAI_API_KEY","")
+        if not key:
+            return "⚠️ No OpenAI API key detected — showing Free Demo result.\n\n" + local_template_answer(role, q)
+        try:
+            return try_openai(system, q)
+        except Exception as e:
+            return f"⚠️ OpenAI error → fallback:\n`{e}`\n\n" + local_template_answer(role, q)
+    # Auto: prefer Claude then OpenAI, else demo
+    if provider_choice == "Auto":
+        # Try Claude if key exists
+        ckey = st.session_state.get("CLAUDE_API_KEY","")
+        if ckey:
+            try:
+                return try_claude(system, q)
+            except Exception as e:
+                st.info(f"Claude failed, trying OpenAI… ({e})")
+        # Try OpenAI if key exists
+        okey = st.session_state.get("OPENAI_API_KEY","")
+        if okey:
+            try:
+                return try_openai(system, q)
+            except Exception as e:
+                st.info(f"OpenAI failed, showing Demo… ({e})")
+        # Fallback to local
+        return local_template_answer(role, q)
+    # default
+    return local_template_answer(role, q)
 
-    if provider == "OpenAI":
-        if cols[1].button("Generate with OpenAI Images"):
-            if ensure_key_for(provider) and img_prompt.strip():
-                try:
-                    from openai import OpenAI
-                    import base64
-                    client = OpenAI(api_key=st.session_state["OPENAI_API_KEY"])
-                    img_resp = client.images.generate(
-                        model="gpt-image-1",
-                        prompt=img_prompt.strip(),
-                        size=size,
-                    )
-                    if img_resp and img_resp.data and img_resp.data[0].b64_json:
-                        st.image(
-                            Image.open(
-                                ImageBytes:=
-                                None
-                            ),
-                            caption="Generated Image",
-                            use_container_width=True
-                        )
-                    # Simpler decode/display without PIL:
-                    b64 = img_resp.data[0].b64_json
-                    st.image(np.frombuffer(base64.b64decode(b64), dtype=np.uint8), caption="Generated Image")
-                except ModuleNotFoundError:
-                    st.error("Missing `openai` package. Install with: `pip install openai` or use the included requirements.txt.")
-                except Exception as e:
-                    st.error(f"OpenAI image error: {e}")
-    else:
-        cols[1].markdown("_Switch provider to **OpenAI** to try real image generation (requires credits)._")
-
-st.markdown("---")
-st.caption("Unified Studio — Free Demo ready. Claude/OpenAI optional.")
+if st.button("Generate Response"):
+    answer = auto_fallback_answer(provider, role_label, user_q)
+    st.markdown(answer)
